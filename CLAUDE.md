@@ -74,6 +74,20 @@ Touch orientation is already fixed in the device tree (`swapxy,invy`), so
 evdev coordinates line up with the landscape framebuffer. Do not add a
 software rotation on top of it.
 
+**Never hardcode an event node.** Numbering is not stable; this panel has
+already moved from `event5` to `event1`. `find_touchscreen()` scans
+`/dev/input` and takes the first device reporting `EV_ABS` with `ABS_X` and
+`ABS_Y`, which is the actual definition of a touchscreen. That beats both the
+`by-path` symlink (`platform-1f00050000.spi-cs-1-event`, which encodes this
+chip select) and a driver-name match, because neither survives swapping the
+hat for a capacitive panel, which is the plan.
+
+Missing hardware degrades rather than aborting: with no touchscreen it runs
+display-only, since a readout with no buttons still beats nothing. A missing
+framebuffer is fatal but says why, and the geometry is checked against
+480x320 at startup so a fixed layout is never silently painted into the
+corner of some other fb0.
+
 `fbtft` is a staging driver and says so in dmesg. Assume rough edges.
 
 ## LVGL
