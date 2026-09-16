@@ -1,8 +1,24 @@
 # pi-dashboard
 
-A touchscreen UI for a Raspberry Pi 5 with a 480x320 ILI9486 SPI LCD hat,
-running on the bare Linux framebuffer. No X11, no Wayland, no compositor,
-no browser.
+`benchpi`, a touchscreen status panel for a Raspberry Pi 5 with a 480x320
+ILI9486 SPI LCD hat, running on the bare Linux framebuffer. No X11, no
+Wayland, no compositor, no browser.
+
+```
++--------------------------------------------------+
+| raspberrypi                      wlan0 10.2.1.60  |
+| +------------+ +------------+ +----------------+  |
+| |   49.0C    | |    13%     | |     0.03       |  |
+| |  CPU TEMP  | |   MEMORY   | |     LOAD       |  |
+| +------------+ +------------+ +----------------+  |
+| +----------------------------------------------+  |
+| | USB                                  up 22m  |  |
+| | CH341A programmer                            |  |
+| | FT232R USB UART                              |  |
+| +----------------------------------------------+  |
+| [    REBOOT    ]          [    SHUTDOWN    ]      |
++--------------------------------------------------+
+```
 
 ## Hardware
 
@@ -15,7 +31,8 @@ no browser.
 Touch orientation is corrected in the device tree with `swapxy,invy`, so the
 evdev coordinates already line up with the landscape framebuffer.
 
-`martin` is in the `video` and `input` groups, so the app does not need root.
+`martin` is in the `video` and `input` groups, so the app itself does not need
+root.
 
 ## Building
 
@@ -24,8 +41,7 @@ It is not checked in.
 
 ```sh
 make lvgl        # download LVGL 9.5.0 into ./lvgl
-make -j4         # ~700 translation units, a couple of minutes on a Pi 5
-./benchpi
+make -j4         # ~700 translation units, under 30 seconds on a Pi 5
 ```
 
 `make lvgl` has to run first: the source list is a `find` expanded when the
@@ -33,8 +49,8 @@ Makefile is parsed.
 
 ## Running
 
-The kernel console has to be taken off the framebuffer first, or it will
-fight the UI. See "The console owns fb0 too" below.
+Take the kernel console off the framebuffer first, or it will corrupt the UI.
+See "The console owns fb0 too" below for why.
 
 ```sh
 sudo systemctl disable --now gpm      # reads the touchscreen as a mouse
@@ -44,15 +60,49 @@ echo 0 | sudo tee /sys/class/vtconsole/vtcon1/bind
 
 `echo 1` to that same file gives the console back.
 
-## Current state
+The REBOOT and SHUTDOWN buttons additionally need a sudoers drop-in, or they
+will display `NO SUDO` and do nothing:
 
-Proof of concept, and it works. Dark screen, live touch X/Y readout, one large
-`TOUCH ME` button, a press counter. Verified on hardware: the counter reached
-26, touch coordinates track the finger, and the button renders a pressed
-state. That means framebuffer output and touch input are both solved and
-everything from here is application code.
+```sh
+sudo install -o root -g root -m 0440 benchpi.sudoers /etc/sudoers.d/benchpi
+```
 
-Costs 2.6 MB RSS and 0.0% CPU while idle.
+That grants exactly `systemctl poweroff` and `systemctl reboot`. It is needed
+because polkit treats the dashboard's session as remote, having no seat, and
+demands authentication for `org.freedesktop.login1.power-off`, which a
+touchscreen cannot supply. `pkcheck` says so directly:
+
+```
+$ pkcheck --action-id org.freedesktop.login1.power-off --process $$
+Authorization requires authentication and -u wasn't passed.
+```
+
+Running the whole UI as root to avoid that one file would be a much worse
+trade.
+
+## What it shows
+
+Hostname, the active IPv4 address and which interface it is on, CPU
+temperature, memory used, 1 minute load average, uptime, and the product
+strings of every attached USB device that is not a root hub. Everything comes
+from `sysfs`, `procfs` and `getifaddrs()`; there are no runtime dependencies
+beyond libc and LVGL, and nothing is shelled out to.
+
+IPv4 only, and interface-agnostic. The Pi has DHCP reservations on both
+interfaces (`10.2.1.57` wired, `10.2.1.60` wireless) but usually only one is
+up, so the panel picks whichever has an address and prefers the wired one.
+IPv6 is deliberately ignored, because nobody is reading a SLAAC address off a
+3.5 inch display.
+
+Labels are only rewritten when their text actually changes. Every redraw is
+real milliseconds on a 32 MHz SPI panel, so a 1 Hz refresh of unchanged values
+costs nothing.
+
+REBOOT and SHUTDOWN arm on the first tap and fire on the second, reverting
+after 3 seconds. A resistive touchscreen on a bench picks up stray contact,
+and one brush past the panel should not power the machine off.
+
+Idle cost is about 2.8 MB RSS and 0.0% CPU.
 
 ## Notes
 
@@ -62,6 +112,10 @@ Costs 2.6 MB RSS and 0.0% CPU while idle.
   written for it will not compile.
 * `lv_conf.h` only lists the settings we change. `lv_conf_internal.h` supplies
   a default for every option we leave out.
+* `fbtft` pushes the framebuffer to the panel over SPI via deferred IO. If
+  updates do not appear, try `lv_linux_fbdev_set_force_refresh(disp, true)`,
+  or set `LV_LINUX_FBDEV_MMAP 0` to use `pwrite()` instead of `mmap`.
+
 ### The console owns fb0 too
 
 `vtcon1` is bound to the same framebuffer, and it will corrupt the UI. What we
@@ -82,33 +136,28 @@ That is LVGL issuing `FB_BLANK_UNBLANK`, and fbtft answering `EINVAL`. It is
 harmless in itself, but it means LVGL cannot recover the screen on its own.
 Because the default render mode is `LV_DISPLAY_RENDER_MODE_PARTIAL`, LVGL only
 repaints areas it has invalidated, so the blacked-out regions stay black.
-
-Unbind the console rather than working around it in the app:
-
-```sh
-echo 0 | sudo tee /sys/class/vtconsole/vtcon1/bind
-```
+Note that `consoleblank=0` on the kernel command line does not prevent this.
 
 `gpm` is a second offender. It ships enabled on this image, running
 `gpm -m /dev/input/mice -t exps2`, and `/dev/input/mice` aggregates `mouse0`,
 which is the ADS7846. So it reads the touchscreen as a mouse and paints a
-console cursor onto the framebuffer. `sudo systemctl disable --now gpm`.
+console cursor onto the framebuffer.
 
 ### Debugging notes
 
 * The journal is not persistent. `/var/log/journal/` exists but is empty, so
   journald writes to `/run` and every reboot destroys the evidence. Worth
-  fixing before chasing any crash.
+  fixing before chasing any crash:
+  `sudo mkdir -p /var/log/journal && sudo systemctl restart systemd-journald`
 * `systemd` arms the BCM2835 hardware watchdog with a 60 second timeout, so
   anything that wedges PID 1 is a hard reset with no log at all.
 * `sudo` here is not passwordless. The RPi image sets
-  `Defaults timestamp_type=global`, so a `sudo` in any session warms the
-  credential cache for every other session by the same user.
+  `Defaults timestamp_type=global` in `/etc/sudoers.d/010_global-tty`, so a
+  `sudo` in any session warms the credential cache for every other session by
+  the same user.
 * To screenshot the panel, dump the framebuffer and decode RGB565:
   `cat /dev/fb0 > fb.raw` gives 307200 bytes, 480x320 at 2 bytes per pixel
-  with no stride padding.
+  with no stride padding. Counting distinct pixel values is a fast corruption
+  check; a clean screen has well under a hundred.
 * The display is `spi0.0` and the touchscreen is `spi0.1`, sharing one SPI
   bus at 32 MHz with `fps=30`.
-* `fbtft` pushes the framebuffer to the panel over SPI via deferred IO. If
-  updates do not appear, try `lv_linux_fbdev_set_force_refresh(disp, true)`,
-  or set `LV_LINUX_FBDEV_MMAP 0` to use `pwrite()` instead of `mmap`.

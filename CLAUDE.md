@@ -4,10 +4,17 @@ Working notes for this repo. Read before touching the Pi.
 
 ## What this is
 
-An LVGL touchscreen UI for a Raspberry Pi 5 with a 480x320 ILI9486 SPI hat,
-drawing straight to the Linux framebuffer. No X11, no Wayland, no compositor,
-no browser. Eventually a bench appliance ("benchpi"); right now a proof of
-concept that renders a button and counts presses.
+`benchpi`, an LVGL touchscreen status panel for a Raspberry Pi 5 with a
+480x320 ILI9486 SPI hat, drawing straight to the Linux framebuffer. No X11, no
+Wayland, no compositor, no browser.
+
+Shows hostname, active IPv4 and its interface, CPU temperature, memory, load,
+uptime, attached USB devices, and REBOOT / SHUTDOWN buttons. Everything comes
+from sysfs, procfs and `getifaddrs()`. IPv4 only on purpose.
+
+Deliberately not built, because it has not been needed: GPIO, I2C and SPI
+pages, a serial console launcher, flashrom controls. Martin does 1-wire on
+ESP32s and has not touched I2C on this box. Add when there is a real use.
 
 ## Layout
 
@@ -68,6 +75,21 @@ enough that there is no reason to set up cross-compiling.
 
 `lv_timer_handler()` can return `LV_NO_TIMER_READY` (`UINT32_MAX`). Clamp the
 sleep or the loop parks for 49 days.
+
+## Privileged actions
+
+The UI runs unprivileged. Only the two power buttons need root, and they shell
+out to `sudo -n` with absolute paths against `/etc/sudoers.d/benchpi`, shipped
+in the repo as `benchpi.sudoers`.
+
+polkit is not an option here: every session on this box is seatless, so
+`org.freedesktop.login1.power-off` requires authentication that a touchscreen
+cannot supply. `pkcheck --action-id org.freedesktop.login1.power-off --process $$`
+returns "Authorization requires authentication". Do not "fix" this by running
+the whole UI as root.
+
+`sudo -n` rather than `sudo` matters: without it, a missing sudoers rule makes
+the app block forever on a password prompt instead of showing `NO SUDO`.
 
 ## Gotchas that cost time
 
