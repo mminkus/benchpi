@@ -147,14 +147,28 @@ so a `sudo` in any of Martin's sessions warms the credential cache for every
 other session by the same user. There is no `NOPASSWD` rule. Do not rely on
 it; ask for the commands to be run instead.
 
-**The journal was not persistent**, and the obvious fix does not work.
-`Storage=auto` does not mean "write to /var". journald writes to `/run` and
-stays there until something flushes it, and that something is
-`systemd-journal-flush.service`, a `static` oneshot that runs once at boot.
-So `mkdir /var/log/journal && systemctl restart systemd-journald` leaves
-journald in the pre-flush state and looks like it did nothing. Either
-`systemctl restart systemd-journal-flush`, or just reboot once the directory
-exists.
+**The journal is volatile by vendor decree, and nothing local overrides it by
+accident.** Raspberry Pi OS ships
+`/usr/lib/systemd/journald.conf.d/40-rpi-volatile-storage.conf` containing
+`Storage=volatile`, to spare the SD card. The commented `#Storage=auto` in
+`journald.conf` is therefore a red herring, and so is the empty
+`/var/log/journal/` directory: creating it, restarting journald and running
+`systemctl restart systemd-journal-flush` all silently do nothing, because
+journald has been explicitly told never to write to disk.
+
+`systemd-analyze cat-config systemd/journald.conf` shows the merged result and
+is the only honest way to check. `journalctl --header | grep "File path"` says
+where it is actually writing.
+
+`/etc` beats `/usr/lib`:
+
+```sh
+sudo mkdir -p /etc/systemd/journald.conf.d
+printf '[Journal]\nStorage=persistent\nSystemMaxUse=64M\n' | sudo tee /etc/systemd/journald.conf.d/50-persistent.conf
+sudo systemctl restart systemd-journald
+```
+
+Keep the size cap. The volatile default exists for a real reason.
 
 **systemd arms the BCM2835 hardware watchdog at 60 seconds.** Anything that
 wedges PID 1 for a minute is a hard reset with no log.
