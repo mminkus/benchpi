@@ -33,6 +33,33 @@ The Pi already holds `martin_at_luna_rsa_key`, and the dev box authorises
 
 Edit here, commit here, `git pull` on the Pi, build on the Pi.
 
+## The device tree config that makes the hat work
+
+In `/boot/firmware/config.txt`. This is the hard-won part; nothing else in this
+repo matters if these are wrong.
+
+```
+dtparam=spi=on
+
+[all]
+dtoverlay=fbtft,spi0-0,piscreen,dc_pin=24,reset_pin=25,led_pin=22,rotate=90
+dtoverlay=ads7846,cs=1,penirq=17,speed=2000000,swapxy,invy,xmin=500,xmax=3650,ymin=450,ymax=3750
+```
+
+Notes on why each piece is there:
+
+- `piscreen` is the fbtft variant that drives this ILI9486. The generic
+  `ili9486` overlay is not the same thing.
+- `rotate=90` is what makes `/dev/fb0` come up as 480x320 landscape rather
+  than 320x480 portrait, so no software rotation is needed anywhere.
+- `swapxy,invy` on the touchscreen matches the panel rotation. The evdev
+  coordinates therefore already line up with the framebuffer. **Do not add a
+  transform in the application.**
+- `xmin/xmax/ymin/ymax` are the touch calibration. They are why raw ADS7846
+  readings map onto 0..479 and 0..319 correctly.
+- `[pi5] dtoverlay=nospi10` is already in the stock file above these lines and
+  is required on a Pi 5.
+
 ## Hardware facts
 
 | Thing        | Value                                                     |
@@ -108,21 +135,47 @@ sudo systemctl disable --now gpm
 echo 0 | sudo tee /sys/class/vtconsole/vtcon1/bind
 ```
 
-**gpm ships enabled** running `gpm -m /dev/input/mice -t exps2`, and
-`/dev/input/mice` aggregates `mouse0`, which is the ADS7846. It reads the
-touchscreen as a mouse and paints a cursor onto the framebuffer.
+**gpm** was installed to test the touchscreen before this project existed, and
+then quietly kept running. `gpm -m /dev/input/mice -t exps2`, and
+`/dev/input/mice` aggregates `mouse0`, which is the ADS7846. It read the
+touchscreen as a mouse and painted a cursor onto the framebuffer. It has been
+`apt purge`d, so `systemctl disable gpm` will now fail with "Unit
+gpm.service does not exist". That is the desired state, not a problem.
 
 **sudo is not passwordless.** The image sets `Defaults timestamp_type=global`,
 so a `sudo` in any of Martin's sessions warms the credential cache for every
 other session by the same user. There is no `NOPASSWD` rule. Do not rely on
 it; ask for the commands to be run instead.
 
-**The journal is not persistent.** `/var/log/journal/` exists but is empty, so
-journald writes to `/run` and reboots destroy the evidence. Fix this before
-investigating any crash.
+**The journal was not persistent**, and the obvious fix does not work.
+`Storage=auto` does not mean "write to /var". journald writes to `/run` and
+stays there until something flushes it, and that something is
+`systemd-journal-flush.service`, a `static` oneshot that runs once at boot.
+So `mkdir /var/log/journal && systemctl restart systemd-journald` leaves
+journald in the pre-flush state and looks like it did nothing. Either
+`systemctl restart systemd-journal-flush`, or just reboot once the directory
+exists.
 
 **systemd arms the BCM2835 hardware watchdog at 60 seconds.** Anything that
 wedges PID 1 for a minute is a hard reset with no log.
+
+## Bench peripherals
+
+The point of the box. Both were previously used from a MacBook Pro; the plan
+is to do this work on the Pi from now on.
+
+| Device | USB ID | Product string | Node |
+| --- | --- | --- | --- |
+| CH341A programmer | `1a86:5512` | `USB UART-LPT` | none, raw USB |
+| FT232R serial | `0403:6001` | `FT232R USB UART` | `/dev/ttyUSB0` |
+
+`martin` is in `dialout`, so the FT232R works with no further setup. The
+CH341A is raw USB, so flashrom will want root or a udev rule. **flashrom is
+not installed yet.**
+
+The dashboard lists USB devices by reading `product` from
+`/sys/bus/usb/devices/*/` and skipping vendor `1d6b`, which is the Linux
+Foundation root hubs. There are four of those on a Pi 5.
 
 ## Testing without being in the room
 
