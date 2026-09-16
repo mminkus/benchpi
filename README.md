@@ -1,4 +1,4 @@
-# pi-dashboard
+# benchpi
 
 `benchpi`, a touchscreen status panel for a Raspberry Pi 5 with a 480x320
 ILI9486 SPI LCD hat, running on the bare Linux framebuffer. No X11, no
@@ -6,7 +6,7 @@ Wayland, no compositor, no browser.
 
 ```
 +--------------------------------------------------+
-| raspberrypi                      wlan0 10.2.1.60  |
+| benchpi                          eth0  192.0.2.17 |
 | +------------+ +------------+ +----------------+  |
 | |   49.0C    | |    13%     | |     0.03       |  |
 | |  CPU TEMP  | |   MEMORY   | |     LOAD       |  |
@@ -31,8 +31,8 @@ Wayland, no compositor, no browser.
 Touch orientation is corrected in the device tree with `swapxy,invy`, so the
 evdev coordinates already line up with the landscape framebuffer.
 
-`martin` is in the `video` and `input` groups, so the app itself does not need
-root.
+The user running it needs the `video` and `input` groups. The app itself
+never needs root.
 
 ## Building
 
@@ -64,10 +64,12 @@ The REBOOT and SHUTDOWN buttons additionally need a sudoers drop-in, or they
 will display `NO SUDO` and do nothing:
 
 ```sh
-sudo install -o root -g root -m 0440 benchpi.sudoers /etc/sudoers.d/benchpi
+sed "s/YOURUSER/$USER/" benchpi.sudoers \
+    | sudo install -o root -g root -m 0440 /dev/stdin /etc/sudoers.d/benchpi
 ```
 
-That grants exactly `systemctl poweroff` and `systemctl reboot`. It is needed
+The `sed` fills in whoever runs the dashboard. It grants exactly
+`systemctl poweroff` and `systemctl reboot`, and nothing else. It is needed
 because polkit treats the dashboard's session as remote, having no seat, and
 demands authentication for `org.freedesktop.login1.power-off`, which a
 touchscreen cannot supply. `pkcheck` says so directly:
@@ -83,7 +85,8 @@ trade.
 ## Starting it at boot
 
 ```sh
-sudo cp benchpi.service /etc/systemd/system/
+sed "s/YOURUSER/$USER/g; s|YOURHOME|$HOME|" benchpi.service \
+    | sudo tee /etc/systemd/system/benchpi.service
 sudo systemctl enable --now benchpi
 ```
 
@@ -115,11 +118,11 @@ strings of every attached USB device that is not a root hub. Everything comes
 from `sysfs`, `procfs` and `getifaddrs()`; there are no runtime dependencies
 beyond libc and LVGL, and nothing is shelled out to.
 
-IPv4 only, and interface-agnostic. The Pi has DHCP reservations on both
-interfaces (`10.2.1.57` wired, `10.2.1.60` wireless) but usually only one is
-up, so the panel picks whichever has an address and prefers the wired one.
-IPv6 is deliberately ignored, because nobody is reading a SLAAC address off a
-3.5 inch display.
+IPv4 only, and interface-agnostic. A Pi with DHCP reservations on both
+interfaces still usually has only one of them up, so the panel takes whichever
+holds an address and prefers the wired one rather than hardcoding `eth0` or
+`wlan0`. IPv6 is deliberately ignored, because nobody is reading a SLAAC
+address off a 3.5 inch display.
 
 Labels are only rewritten when their text actually changes. Every redraw is
 real milliseconds on a 32 MHz SPI panel, so a 1 Hz refresh of unchanged values

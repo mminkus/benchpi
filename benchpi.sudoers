@@ -1,6 +1,8 @@
-# Install as /etc/sudoers.d/benchpi, owned by root, mode 0440:
+# Install as /etc/sudoers.d/benchpi, owned by root, mode 0440. The sed fills in
+# whoever runs the dashboard:
 #
-#   sudo install -o root -g root -m 0440 benchpi.sudoers /etc/sudoers.d/benchpi
+#   sed "s/YOURUSER/$USER/" benchpi.sudoers \
+#       | sudo install -o root -g root -m 0440 /dev/stdin /etc/sudoers.d/benchpi
 #
 # The dashboard's REBOOT and SHUTDOWN buttons need these two commands and
 # nothing else. Running the whole UI as root to avoid this file would be a
@@ -9,4 +11,4 @@
 # This is necessary because polkit treats the dashboard's session as remote
 # (no seat) and demands authentication for org.freedesktop.login1.power-off,
 # which a touchscreen cannot supply.
-martin ALL=(root) NOPASSWD: /usr/bin/systemctl poweroff, /usr/bin/systemctl reboot
+YOURUSER ALL=(root) NOPASSWD: /usr/bin/systemctl poweroff, /usr/bin/systemctl reboot

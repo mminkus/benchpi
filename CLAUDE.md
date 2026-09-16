@@ -13,25 +13,14 @@ uptime, attached USB devices, and REBOOT / SHUTDOWN buttons. Everything comes
 from sysfs, procfs and `getifaddrs()`. IPv4 only on purpose.
 
 Deliberately not built, because it has not been needed: GPIO, I2C and SPI
-pages, a serial console launcher, flashrom controls. Martin does 1-wire on
-ESP32s and has not touched I2C on this box. Add when there is a real use.
+pages, a serial console launcher, flashrom controls. Add when there is a
+real use for them.
 
-## Layout
+## Workflow
 
-The canonical repo lives on the dev box at `debian.dc` in
-`/home/martin/development/pi-dashboard`. The Pi clones from it:
-
-```sh
-# on the Pi
-git clone martin@10.1.1.90:/home/martin/development/pi-dashboard ~/pi-dashboard
-git config core.sshCommand "ssh -i ~/.ssh/martin_at_luna_rsa_key"
-```
-
-The Pi already holds `martin_at_luna_rsa_key`, and the dev box authorises
-`martin@luna`, so that key is what makes the clone work. Note the dev box is
-`10.1.1.90`, a different subnet from the Pi's `10.2.1.60`, but routable.
-
-Edit here, commit here, `git pull` on the Pi, build on the Pi.
+Edit on a workstation, commit, `git pull` on the Pi, build on the Pi. A full
+build is under 30 seconds there, so cross-compiling has never been worth
+setting up.
 
 ## The device tree config that makes the hat work
 
@@ -68,7 +57,7 @@ Notes on why each piece is there:
 | Display      | `/dev/fb0`, `fb_ili9486`, 480x320 RGB565, stride 960       |
 | Display bus  | `spi0.0` at 32 MHz, `fps=30`, DT `rotate=90`               |
 | Touch        | `/dev/input/event1`, ADS7846, `spi0.1`, also `mouse0`      |
-| Permissions  | `martin` is in `video` and `input`, so no root needed      |
+| Permissions  | the user needs `video` and `input`; no root required       |
 
 Touch orientation is already fixed in the device tree (`swapxy,invy`), so
 evdev coordinates line up with the landscape framebuffer. Do not add a
@@ -157,7 +146,7 @@ touchscreen as a mouse and painted a cursor onto the framebuffer. It has been
 gpm.service does not exist". That is the desired state, not a problem.
 
 **sudo is not passwordless.** The image sets `Defaults timestamp_type=global`,
-so a `sudo` in any of Martin's sessions warms the credential cache for every
+so a `sudo` in any of the user's sessions warms the credential cache for every
 other session by the same user. There is no `NOPASSWD` rule. Do not rely on
 it; ask for the commands to be run instead.
 
@@ -208,7 +197,7 @@ is to do this work on the Pi from now on.
 | CH341A programmer | `1a86:5512` | `USB UART-LPT` | none, raw USB |
 | FT232R serial | `0403:6001` | `FT232R USB UART` | `/dev/ttyUSB0` |
 
-`martin` is in `dialout`, so the FT232R works with no further setup and
+The user needs `dialout` for the FT232R, which then works with no setup and
 appears as `/dev/ttyUSB0` via `ftdi_sio`.
 
 **No kernel driver binds the CH341A**, so flashrom's `ch341a_spi` programmer
@@ -226,7 +215,7 @@ Foundation root hubs. There are four of those on a Pi 5.
 
 ## Autostart
 
-`benchpi.service` in this repo. It runs the UI as `martin`, unprivileged, and
+`benchpi.service` in this repo. It runs the UI unprivileged and
 uses systemd's `+` prefix on `ExecStartPre` to do the one thing that needs
 root:
 
@@ -248,7 +237,7 @@ again whenever the dashboard is not running.
 Screenshot the panel by dumping the framebuffer and decoding RGB565:
 
 ```sh
-ssh martin@10.2.1.60 'cat /dev/fb0 > /tmp/fb.raw'   # 307200 bytes, no padding
+ssh pi 'cat /dev/fb0 > /tmp/fb.raw'                 # 307200 bytes, no padding
 ```
 
 ```python
