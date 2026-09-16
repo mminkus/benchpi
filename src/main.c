@@ -48,6 +48,10 @@ static lv_obj_t * lbl_usb;
 
 /* ------------------------------------------------------------------ devices */
 
+/* Long enough for any name the kernel can hand us, so gcc can see that
+ * nothing here is ever truncated. */
+#define DEV_PATH_MAX    (sizeof "/dev/input/" + NAME_MAX)
+
 #define BITS_PER_LONG   (sizeof(long) * 8)
 #define NLONGS(n)       (((n) + BITS_PER_LONG - 1) / BITS_PER_LONG)
 #define TEST_BIT(b, a)  (((a)[(b) / BITS_PER_LONG] >> ((b) % BITS_PER_LONG)) & 1)
@@ -68,9 +72,7 @@ static bool find_touchscreen(char * path, size_t path_n, char * name, size_t nam
     for(int i = 0; i < cnt; i++) {
         if(found || strncmp(ents[i]->d_name, "event", 5) != 0) continue;
 
-        /* Sized for the longest name the kernel can hand us, so gcc can see
-         * that the path is never truncated. */
-        char candidate[sizeof "/dev/input/" + NAME_MAX];
+        char candidate[DEV_PATH_MAX];
         snprintf(candidate, sizeof candidate, "/dev/input/%s", ents[i]->d_name);
 
         int fd = open(candidate, O_RDONLY | O_NONBLOCK);
@@ -408,7 +410,7 @@ int main(void)
         fprintf(stderr, "benchpi: %s %dx%d\n", FB_DEV, (int)w, (int)h);
     }
 
-    char touch_path[64], touch_name[128];
+    char touch_path[DEV_PATH_MAX], touch_name[128];
     if(!find_touchscreen(touch_path, sizeof touch_path, touch_name, sizeof touch_name)) {
         /* Still worth running. The panel is a useful readout with no buttons,
          * and this is a lot friendlier than refusing to start. */
