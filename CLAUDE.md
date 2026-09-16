@@ -265,9 +265,22 @@ The framebuffer survives hard abuse: 20 seconds of full-frame `write()` blits
 and 20 seconds of `mmap` writes at ~9600 fps both pass without complaint, so
 rule fbtft out early rather than suspecting it.
 
-## Open
+## Power
 
-One unexplained hard reboot, roughly 20 seconds into the first run of the app.
-Not reproducible since; the app has soaked for over ten minutes at 2.6 MB RSS
-and 0.0% CPU. Framebuffer stress tests do not trigger it. No log survived,
-because of the journal problem above. Watch for it.
+The Pi has negotiated a **3A supply**, not the official 5A one:
+`/sys/firmware/devicetree/base/chosen/power/max_current` reads `3000`. On a Pi
+5 that makes the firmware cap **total USB current at 600mA** rather than
+1.6A. Fine for a programmer and a serial adapter; not fine for bus-powered
+storage. `vcgencmd get_throttled` is `0x0` and `EXT5V_V` sits at 5.04V, so the
+rail itself is healthy.
+
+## Closed
+
+**The one hard reboot, early on, was almost certainly a power interruption**
+while the Pi was physically picked up to be photographed. It was never
+reproducible: 20 seconds of full-frame `write()` blits, 20 seconds of `mmap`
+writes at roughly 9600 fps, and long soaks all passed. A panic or a watchdog
+reset leaves traces; this left none and was instant, which is the shape of
+losing power, not of software. Note that a persistent journal would not have
+caught it either, since nothing is written during a brownout. Worth having
+anyway, just not for this.
