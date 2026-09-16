@@ -174,13 +174,24 @@ journald has been explicitly told never to write to disk.
 is the only honest way to check. `journalctl --header | grep "File path"` says
 where it is actually writing.
 
-`/etc` beats `/usr/lib`:
+**Two steps are needed, and each looks sufficient on its own.** First override
+the vendor drop-in, since `/etc` beats `/usr/lib` and `50-` sorts after `40-`:
 
 ```sh
 sudo mkdir -p /etc/systemd/journald.conf.d
 printf '[Journal]\nStorage=persistent\nSystemMaxUse=64M\n' | sudo tee /etc/systemd/journald.conf.d/50-persistent.conf
 sudo systemctl restart systemd-journald
 ```
+
+Then flush, because even with `Storage=persistent` journald always *starts* in
+`/run` and only migrates to `/var` on a flush signal:
+
+```sh
+sudo systemctl restart systemd-journal-flush
+```
+
+Only needed once. From the next boot on, `systemd-journal-flush` runs
+automatically and the storage setting is already in place.
 
 Keep the size cap. The volatile default exists for a real reason.
 
