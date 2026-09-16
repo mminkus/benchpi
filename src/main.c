@@ -7,6 +7,7 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <ifaddrs.h>
+#include <limits.h>
 #include <linux/input.h>
 #include <net/if.h>
 #include <stdbool.h>
@@ -67,7 +68,9 @@ static bool find_touchscreen(char * path, size_t path_n, char * name, size_t nam
     for(int i = 0; i < cnt; i++) {
         if(found || strncmp(ents[i]->d_name, "event", 5) != 0) continue;
 
-        char candidate[64];
+        /* Sized for the longest name the kernel can hand us, so gcc can see
+         * that the path is never truncated. */
+        char candidate[sizeof "/dev/input/" + NAME_MAX];
         snprintf(candidate, sizeof candidate, "/dev/input/%s", ents[i]->d_name);
 
         int fd = open(candidate, O_RDONLY | O_NONBLOCK);
