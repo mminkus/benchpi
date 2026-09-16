@@ -5,17 +5,24 @@
  */
 #include <arpa/inet.h>
 #include <dirent.h>
+#include <fcntl.h>
 #include <ifaddrs.h>
+#include <linux/input.h>
 #include <net/if.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <unistd.h>
 
 #include "lvgl/lvgl.h"
 
 #define FB_DEV      "/dev/fb0"
-#define TOUCH_DEV   "/dev/input/event1"
+
+/* The layout below is positioned for exactly this. */
+#define SCREEN_W    480
+#define SCREEN_H    320
 
 /* Cap the idle sleep so a lv_timer_handler() of LV_NO_TIMER_READY does not
  * park us for 49 days, and so touch stays responsive at ~30fps. */
@@ -37,6 +44,53 @@ static lv_obj_t * lbl_ram;
 static lv_obj_t * lbl_load;
 static lv_obj_t * lbl_uptime;
 static lv_obj_t * lbl_usb;
+
+/* ------------------------------------------------------------------ devices */
+
+#define BITS_PER_LONG   (sizeof(long) * 8)
+#define NLONGS(n)       (((n) + BITS_PER_LONG - 1) / BITS_PER_LONG)
+#define TEST_BIT(b, a)  (((a)[(b) / BITS_PER_LONG] >> ((b) % BITS_PER_LONG)) & 1)
+
+/* A touchscreen is any evdev device reporting absolute X and Y. Matching on
+ * that rather than on a hardcoded "event1" survives renumbering, which is not
+ * hypothetical: this panel has already moved from event5 to event1. It also
+ * survives swapping the hat for a capacitive one, where neither the device
+ * name nor the by-path symlink would still match. */
+static bool find_touchscreen(char * path, size_t path_n, char * name, size_t name_n)
+{
+    struct dirent ** ents;
+    bool found = false;
+
+    int cnt = scandir("/dev/input", &ents, NULL, alphasort);
+    if(cnt < 0) return false;
+
+    for(int i = 0; i < cnt; i++) {
+        if(found || strncmp(ents[i]->d_name, "event", 5) != 0) continue;
+
+        char candidate[64];
+        snprintf(candidate, sizeof candidate, "/dev/input/%s", ents[i]->d_name);
+
+        int fd = open(candidate, O_RDONLY | O_NONBLOCK);
+        if(fd < 0) continue;
+
+        unsigned long types[NLONGS(EV_MAX + 1)] = { 0 };
+        unsigned long axes[NLONGS(ABS_MAX + 1)] = { 0 };
+
+        if(ioctl(fd, EVIOCGBIT(0, sizeof types), types) >= 0 && TEST_BIT(EV_ABS, types) &&
+           ioctl(fd, EVIOCGBIT(EV_ABS, sizeof axes), axes) >= 0 &&
+           TEST_BIT(ABS_X, axes) && TEST_BIT(ABS_Y, axes)) {
+            snprintf(path, path_n, "%s", candidate);
+            if(ioctl(fd, EVIOCGNAME(name_n), name) < 0) snprintf(name, name_n, "unnamed");
+            found = true;
+        }
+        close(fd);
+    }
+
+    for(int i = 0; i < cnt; i++) free(ents[i]);
+    free(ents);
+
+    return found;
+}
 
 /* ------------------------------------------------------------------ system */
 
@@ -254,7 +308,7 @@ static void build_ui(void)
     lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
 
     /* Header: who we are, and how to reach us. */
-    lv_obj_t * hdr = panel(scr, 0, 0, 480, 34);
+    lv_obj_t * hdr = panel(scr, 0, 0, SCREEN_W, 34);
     lv_obj_set_style_bg_color(hdr, lv_color_hex(C_HEADER), 0);
     lv_obj_set_style_radius(hdr, 0, 0);
 
@@ -333,13 +387,36 @@ int main(void)
 
     lv_display_t * disp = lv_linux_fbdev_create();
     if(lv_linux_fbdev_set_file(disp, FB_DEV) != LV_RESULT_OK) {
-        fprintf(stderr, "cannot open %s\n", FB_DEV);
+        fprintf(stderr, "benchpi: cannot open %s. Is the hat attached and the "
+                        "fbtft overlay loaded?\n", FB_DEV);
         return 1;
     }
 
-    if(lv_evdev_create(LV_INDEV_TYPE_POINTER, TOUCH_DEV) == NULL) {
-        fprintf(stderr, "cannot open %s\n", TOUCH_DEV);
-        return 1;
+    /* Don't silently paint a layout built for 480x320 into the corner of
+     * whatever else fb0 turns out to be one day. */
+    int32_t w = lv_display_get_horizontal_resolution(disp);
+    int32_t h = lv_display_get_vertical_resolution(disp);
+    if(w != SCREEN_W || h != SCREEN_H) {
+        fprintf(stderr, "benchpi: %s is %dx%d, expected %dx%d. Rendering anyway, "
+                        "but the layout will be wrong.\n",
+                FB_DEV, (int)w, (int)h, SCREEN_W, SCREEN_H);
+    }
+    else {
+        fprintf(stderr, "benchpi: %s %dx%d\n", FB_DEV, (int)w, (int)h);
+    }
+
+    char touch_path[64], touch_name[128];
+    if(!find_touchscreen(touch_path, sizeof touch_path, touch_name, sizeof touch_name)) {
+        /* Still worth running. The panel is a useful readout with no buttons,
+         * and this is a lot friendlier than refusing to start. */
+        fprintf(stderr, "benchpi: no touchscreen found, running display-only\n");
+    }
+    else if(lv_evdev_create(LV_INDEV_TYPE_POINTER, touch_path) == NULL) {
+        fprintf(stderr, "benchpi: found %s (%s) but could not open it, "
+                        "running display-only\n", touch_path, touch_name);
+    }
+    else {
+        fprintf(stderr, "benchpi: touch on %s (%s)\n", touch_path, touch_name);
     }
 
     build_ui();

@@ -10,6 +10,11 @@ Description=benchpi touchscreen dashboard
 Documentation=https://github.com/lvgl/lvgl
 After=systemd-user-sessions.service
 
+# If the hat is not attached, benchpi exits immediately. Give up after a few
+# tries rather than respawning forever against hardware that is not there.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
 [Service]
 Type=simple
 User=martin
@@ -24,7 +29,7 @@ ExecStart=/home/martin/pi-dashboard/benchpi
 ExecStopPost=+/bin/sh -c 'echo 1 > /sys/class/vtconsole/vtcon1/bind'
 
 Restart=on-failure
-RestartSec=2
+RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
