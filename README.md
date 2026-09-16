@@ -80,6 +80,33 @@ Authorization requires authentication and -u wasn't passed.
 Running the whole UI as root to avoid that one file would be a much worse
 trade.
 
+## Starting it at boot
+
+```sh
+sudo cp benchpi.service /etc/systemd/system/
+sudo systemctl enable --now benchpi
+```
+
+The unit runs the UI unprivileged and unbinds the console in an
+`ExecStartPre=+` line, which systemd runs as root regardless of `User=`. The
+manual `echo 0 > .../vtcon1/bind` does not survive a reboot, so without this
+the LCD comes back up showing a login prompt.
+
+Stopping the service rebinds the console, so the panel becomes a terminal
+again whenever the dashboard is not running.
+
+## Using the CH341A without root
+
+```sh
+sudo cp 99-ch341a.rules /etc/udev/rules.d/
+sudo udevadm control --reload && sudo udevadm trigger
+```
+
+flashrom's `ch341a_spi` programmer drives the device over libusb, so it needs
+write access to the `/dev/bus/usb` node rather than a tty. No kernel driver
+binds `1a86:5512`, so there is nothing to unbind first. flashrom is already
+installed at `/usr/sbin/flashrom`, which is not on a non-root `PATH` here.
+
 ## What it shows
 
 Hostname, the active IPv4 address and which interface it is on, CPU

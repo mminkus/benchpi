@@ -1,0 +1,9 @@
+# CH341A SPI programmer, so flashrom does not need root.
+#
+#   sudo cp 99-ch341a.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload && sudo udevadm trigger
+#
+# flashrom's ch341a_spi programmer drives the device straight over libusb,
+# which means write access to the /dev/bus/usb node. No kernel driver binds
+# 1a86:5512, so there is nothing to unbind first.
+SUBSYSTEM=="usb", ATTR{idVendor}=="1a86", ATTR{idProduct}=="5512", MODE="0660", GROUP="plugdev", TAG+="uaccess"

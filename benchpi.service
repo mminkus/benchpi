@@ -1,0 +1,30 @@
+# Install with:
+#   sudo cp benchpi.service /etc/systemd/system/
+#   sudo systemctl enable --now benchpi
+#
+# Note that this takes the kernel console off the framebuffer, so the login
+# prompt disappears from the LCD. Stopping the service puts it back.
+
+[Unit]
+Description=benchpi touchscreen dashboard
+Documentation=https://github.com/lvgl/lvgl
+After=systemd-user-sessions.service
+
+[Service]
+Type=simple
+User=martin
+Group=martin
+SupplementaryGroups=video input
+
+# The '+' runs these as root regardless of User=, which is exactly what it is
+# for. fbcon otherwise software-blanks the framebuffer out from under LVGL,
+# because fbtft implements no fb_blank. See the README.
+ExecStartPre=+/bin/sh -c 'echo 0 > /sys/class/vtconsole/vtcon1/bind'
+ExecStart=/home/martin/pi-dashboard/benchpi
+ExecStopPost=+/bin/sh -c 'echo 1 > /sys/class/vtconsole/vtcon1/bind'
+
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

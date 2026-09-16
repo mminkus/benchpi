@@ -183,13 +183,40 @@ is to do this work on the Pi from now on.
 | CH341A programmer | `1a86:5512` | `USB UART-LPT` | none, raw USB |
 | FT232R serial | `0403:6001` | `FT232R USB UART` | `/dev/ttyUSB0` |
 
-`martin` is in `dialout`, so the FT232R works with no further setup. The
-CH341A is raw USB, so flashrom will want root or a udev rule. **flashrom is
-not installed yet.**
+`martin` is in `dialout`, so the FT232R works with no further setup and
+appears as `/dev/ttyUSB0` via `ftdi_sio`.
+
+**No kernel driver binds the CH341A**, so flashrom's `ch341a_spi` programmer
+can claim it over libusb directly, with nothing to unbind first. It does need
+write access to the `/dev/bus/usb` node, which is what `99-ch341a.rules` in
+this repo grants to the `plugdev` group.
+
+flashrom **is** installed, 1.4.0, at `/usr/sbin/flashrom`. Note that
+`/usr/sbin` is not on a non-root `PATH` here, so `command -v flashrom` finds
+nothing and looks like it is missing. It is not.
 
 The dashboard lists USB devices by reading `product` from
 `/sys/bus/usb/devices/*/` and skipping vendor `1d6b`, which is the Linux
 Foundation root hubs. There are four of those on a Pi 5.
+
+## Autostart
+
+`benchpi.service` in this repo. It runs the UI as `martin`, unprivileged, and
+uses systemd's `+` prefix on `ExecStartPre` to do the one thing that needs
+root:
+
+```ini
+ExecStartPre=+/bin/sh -c 'echo 0 > /sys/class/vtconsole/vtcon1/bind'
+ExecStopPost=+/bin/sh -c 'echo 1 > /sys/class/vtconsole/vtcon1/bind'
+```
+
+The unbind is not persistent across a reboot, which is why doing it by hand
+once is not enough: on the next boot fbcon reclaims the framebuffer and you
+get a login prompt on the LCD again. The `+` prefix exists exactly for this
+case, so resist the urge to set `User=root` on the whole unit.
+
+Stopping the service rebinds the console, so the LCD is a usable terminal
+again whenever the dashboard is not running.
 
 ## Testing without being in the room
 
